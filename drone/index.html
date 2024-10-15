@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Leaflet Convex Hull with Longest Line</title>
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"
+    />
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+    <style>
+        #map {
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        // Initialize the map
+        const map = L.map("map").setView([51.505, -0.09], 13);
+
+        // Add a base layer (OpenStreetMap)
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+        }).addTo(map);
+
+        // Initialize feature group for drawn items
+        const drawnItems = new L.FeatureGroup();
+        map.addLayer(drawnItems);
+
+        let drawnPolygon = null; // Variable to store the current polygon
+        let hullLayer = null;    // Variable to store the convex hull layer
+        let longestLineLayer = null; // Variable to store the longest line layer
+
+        // Initialize Leaflet Draw Control
+        const drawControl = new L.Control.Draw({
+            edit: {
+                featureGroup: drawnItems,
+                remove: true, // Allow removal of the polygon
+            },
+            draw: {
+                polygon: drawnPolygon ? false : true, // Disable polygon drawing if one already exists
+                polyline: false,
+                rectangle: false,
+                circle: false,
+                marker: false,
+                circlemarker: false,
+            },
+        });
+        map.addControl(drawControl);
+
+        // Layer groups for Convex Hull and Longest Line
+        const hullGroup = L.layerGroup().addTo(map);
+        const longestLineGroup = L.layerGroup().addTo(map);
+
+        // Add layer controls to toggle visibility of hull and longest line
+        const overlayMaps = {
+            "Convex Hull": hullGroup,
+            "Longest Line": longestLineGroup
+        };
+        L.control.layers(null, overlayMaps).addTo(map);
+
+        // Function to calculate convex hull using Turf.js
+        function calculateConvexHull(polygon) {
+            const geoJsonPolygon = polygon.toGeoJSON();
+            const coordinates = geoJsonPolygon.geometry.coordinates[0];
+            const points = coordinates.map(coord => turf.point(coord));
+            const featureCollection = turf.featureCollection(points);
+            const hull = turf.convex(featureCollection);
+            return hull;
+        }
+
+        // Function to calculate the bearing between two points
+        function calculateBearing(point1, point2) {
+            const bearing = turf.bearing(turf.point(point1), turf.point(point2));
+            return bearing;
+        }
+
+        // Function to find the longest line from the convex hull
+        function findLongestLine(hull) {
+            const coordinates = hull.geometry.coordinates[0];
+            let longestLine = null;
+            let maxDistance = 0;
+
+            // Iterate through each pair of consecutive points
+            for (let i = 0; i < coordinates.length - 1; i++) {
+                const point1 = coordinates[i];
+                const point2 = coordinates[i + 1];
+
+                const line = turf.lineString([point1, point2]);
+                const distance = turf.length(line, { units: "meters" });
+
+                // Check if this is the longest line found
+                if (distance > maxDistance) {
+                    maxDistance = distance;
+                    longestLine = [point1, point2];
+                }
+            }
+
+            return longestLine;
+        }
+
+        // Function to find the bounding box of the convex hull
+        function findBoundingBox(hull) {
+            const bbox = turf.bbox(hull); // Returns [minLon, minLat, maxLon, maxLat]
+            return bbox;
+        }
+
+        // Function to project a point along a bearing to extend the line
+        function projectPoint(startPoint, bearing, distance) {
+            const projected = turf.destination(turf.point(startPoint), distance, bearing, { units: 'meters' });
+            return projected.geometry.coordinates;
+        }
+
+        // Function to ensure the line stays within the bounding box
+        function clipLineToBoundingBox(line, bbox) {
+            const [minLon, minLat, maxLon, maxLat] = bbox;
+
+            // Clip each point of the line to ensure it stays within the bounding box
+            const clippedLine = line.map(coord => {
+                const lon = Math.max(minLon, Math.min(maxLon, coord[0]));
+                const lat = Math.max(minLat, Math.min(maxLat, coord[1]));
+                return [lon, lat];
+            });
+
+            return clippedLine;
+        }
+
+        // Function to adjust the line based on bearing and bounding box
+        function adjustLineToBoundingBox(longestLine, bearing, bbox) {
+            // Project points along the bearing and its reverse to extend the line
+            const extendedStart = projectPoint(longestLine[0], bearing, 10000); // Extend arbitrarily
+            const extendedEnd = projectPoint(longestLine[1], bearing + 180, 10000); // Extend in reverse
+
+            // Clip the line to the bounding box of the convex hull
+            const adjustedLine = clipLineToBoundingBox([extendedStart, extendedEnd], bbox);
+            return adjustedLine;
+        }
+
+        // Function to swap [lon, lat] to [lat, lon] for Leaflet
+        function swapCoordinates(coords) {
+            return [coords[1], coords[0]];
+        }
+
+        // Handle polygon creation event
+        map.on(L.Draw.Event.CREATED, function (event) {
+            const layer = event.layer;
+
+            // Remove the existing polygon if one is already drawn
+            if (drawnPolygon) {
+                drawnItems.removeLayer(drawnPolygon);
+                hullGroup.clearLayers();
+                longestLineGroup.clearLayers();
+            }
+
+            // Add the new polygon to the map
+            drawnItems.addLayer(layer);
+            drawnPolygon = layer;
+
+            // Calculate and display convex hull
+            const hull = calculateConvexHull(layer);
+            if (hull) {
+                hullLayer = L.geoJSON(hull, {
+                    style: {
+                        color: "red",
+                        weight: 2,
+                        opacity: 0.7,
+                    },
+                }).addTo(hullGroup);
+
+                // Find the longest line in the convex hull
+                const longestLine = findLongestLine(hull);
+                if (longestLine) {
+                    // Calculate the bearing of the longest line
+                    const bearing = calculateBearing(longestLine[0], longestLine[1]);
+
+                    // Find the bounding box of the convex hull
+                    const bbox = findBoundingBox(hull);
+
+                    // Adjust the yellow line based on the bounding box and bearing
+                    const adjustedLine = adjustLineToBoundingBox(longestLine, bearing, bbox);
+
+                    // Swap the coordinates from [lon, lat] to [lat, lon] for Leaflet
+                    const leafletLine = adjustedLine.map(swapCoordinates);
+
+                    // Add the adjusted yellow line to the map
+                    longestLineLayer = L.polyline(leafletLine, {
+                        color: "yellow", // Set the longest line to yellow
+                        weight: 8,       // Increase thickness
+                        opacity: 0.9,
+                    }).addTo(longestLineGroup);
+
+                    // Log the convex hull vertices and longest line to the console
+                    const resultObject = {
+                        hullVertices: hull.geometry.coordinates[0],
+                        longestLineCoordinates: longestLine,
+                        adjustedLineCoordinates: adjustedLine
+                    };
+
+                    console.log("Convex Hull and Longest Line Data:", resultObject);
+                }
+            }
+        });
+
+        // Handle polygon deletion to allow drawing another one
+        map.on('draw:deleted', function () {
+            drawnPolygon = null; // Reset the polygon variable
+            hullGroup.clearLayers(); // Remove the convex hull layer if it exists
+            longestLineGroup.clearLayers(); // Remove the longest line if it exists
+        });
+    </script>
+</body>
+</html>
