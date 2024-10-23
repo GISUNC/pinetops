@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leaflet 4-Vertex Polygon and Grid</title>
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
+  />
+
+  <style>
+    #map {
+      height: 500px;
+      width: 100%;
+    }
+    #controls {
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="controls">
+    <label for="pointDensity">Number of points:</label>
+    <input type="range" id="pointDensity" min="2" max="20" value="5" />
+    <span id="densityValue">5</span>
+    <p>Area covered by the polygon: <span id="polygonArea">0</span> acres</p>
+    <button id="export">Export Vertices to CSV</button>
+    <button id="delete">Delete Last Vertex/Polygon</button>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+
+  <script>
+    // Initialize the map and center it on Durham, NC, with restricted bounds
+    var bounds = L.latLngBounds(
+      [[35.984797563677375, -78.99467378854753], [35.98588274167133, -78.98714482784273]]
+    );
+    var map = L.map('map', {
+      maxBounds: bounds, // Restrict the map to these bounds
+      maxBoundsViscosity: 1.0
+    }).setView([35.98534, -78.99091], 17);
+
+    // Add a tile layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      minZoom: 15
+    }).addTo(map);
+
+    // Initialize drawn items and grid layer
+    var drawnItems = new L.FeatureGroup();
+    var gridLayer = new L.LayerGroup();
+    var vertexLayer = new L.LayerGroup(); // Layer for vertices
+    map.addLayer(drawnItems);
+    map.addLayer(gridLayer);
+    map.addLayer(vertexLayer);
+
+    // Store vertex markers
+    var vertexMarkers = [];
+
+    // Handle the slider value change
+    var densitySlider = document.getElementById('pointDensity');
+    var densityValue = document.getElementById('densityValue');
+    densitySlider.oninput = function () {
+      densityValue.textContent = this.value;
+      createGrid(); // Recreate the grid when the slider is changed
+    };
+
+    // Draw control for manually handling the 4-vertex polygon
+    var currentPolygon;
+    var tempPolygon = []; // Temporary storage for polygon vertices
+    var polygonLayer; // For displaying the temp polygon while drawing
+    var polygonAreaElement = document.getElementById('polygonArea');
+
+    map.on('click', function (e) {
+      // Allow the user to add up to 4 vertices
+      if (tempPolygon.length < 4) {
+        tempPolygon.push(e.latlng);
+        
+        if (polygonLayer) {
+          map.removeLayer(polygonLayer); // Clear the temporary polygon
+        }
+
+        // Show the polygon as it's being drawn
+        polygonLayer = L.polygon(tempPolygon, { color: 'blue' }).addTo(map);
+
+        // Create a vertex point at the clicked location
+        var marker = L.circleMarker(e.latlng, { radius: 5, color: 'green' }).addTo(vertexLayer);
+        vertexMarkers.push(marker); // Store the vertex marker
+
+        // Only after adding the 4th point, check if there's an intersection
+        if (tempPolygon.length === 4) {
+          if (doesIntersect(tempPolygon[0], tempPolygon[1], tempPolygon[2], tempPolygon[3])) {
+            alert("Polygon cannot intersect itself.");
+            tempPolygon.pop(); // Remove the last point if there's an intersection
+            map.removeLayer(marker); // Remove the vertex marker
+            return;
+          }
+
+          // Automatically close the polygon by connecting the last point to the first
+          drawnItems.clearLayers(); // Clear previous polygons
+          vertexLayer.clearLayers(); // Clear previous vertices
+          map.removeLayer(polygonLayer); // Remove the temp drawing
+          currentPolygon = L.polygon(tempPolygon, { color: 'blue' }).addTo(drawnItems);
+
+          // Re-add the vertex markers for the final polygon
+          tempPolygon.forEach(function (vertex) {
+            var marker = L.circleMarker(vertex, { radius: 5, color: 'green' }).addTo(vertexLayer);
+            vertexMarkers.push(marker); // Store final vertex markers
+          });
+
+          // Calculate and display the area of the polygon using Shoelace formula and convert to acres
+          var area = calculatePolygonArea(tempPolygon) / 4046.86; // Convert square meters to acres
+          polygonAreaElement.textContent = area.toFixed(2); // Area in acres
+
+          // Clear the temporary array for the next drawing
+          tempPolygon = [];
+
+          createGrid(); // Create the grid immediately after polygon creation
+        }
+      }
+    });
+
+    // Function to create the grid points inside the polygon
+    function createGrid() {
+      if (!currentPolygon) {
+        return; // No polygon drawn yet
+      }
+
+      gridLayer.clearLayers(); // Remove any existing grid points
+
+      var bounds = currentPolygon.getBounds();
+      var latLngs = currentPolygon.getLatLngs()[0]; // Get the polygon vertices
+
+      var rows = parseInt(densitySlider.value, 10); // Number of points in one direction (rows)
+      var cols = rows; // Square grid
+
+      // Calculate the bounding box of the polygon
+      var northWest = bounds.getNorthWest();
+      var southEast = bounds.getSouthEast();
+
+      var latStep = (northWest.lat - southEast.lat) / (rows - 1);
+      var lngStep = (southEast.lng - northWest.lng) / (cols - 1);
+
+      // Generate grid points
+      for (var i = 0; i < rows; i++) {
+        for (var j = 0; j < cols; j++) {
+          var lat = northWest.lat - i * latStep;
+          var lng = northWest.lng + j * lngStep;
+
+          var point = L.latLng(lat, lng);
+
+          // Check if the point is inside the polygon
+          if (isPointInPolygon(point, latLngs)) {
+            var marker = L.circleMarker(point, { radius: 3, color: 'red' });
+            gridLayer.addLayer(marker);
+          }
+        }
+      }
+    }
+
+    // Shoelace formula to calculate polygon area in square meters
+    function calculatePolygonArea(latlngs) {
+      var earthRadius = 6378137; // Radius of the Earth in meters
+      var area = 0;
+      var len = latlngs.length;
+
+      // Convert lat/lng to x/y in meters
+      function latLngToXY(latlng) {
+        var x = (latlng.lng * Math.PI * earthRadius) / 180;
+        var y = (latlng.lat * Math.PI * earthRadius) / 180;
+        return { x: x, y: y };
+      }
+
+      for (var i = 0; i < len; i++) {
+        var p1 = latLngToXY(latlngs[i]);
+        var p2 = latLngToXY(latlngs[(i + 1) % len]); // Wrap to the first point for the last vertex
+        area += p1.x * p2.y - p2.x * p1.y;
+      }
+
+      return Math.abs(area / 2.0); // Area in square meters
+    }
+
+    // Function to check if two line segments intersect
+    function doLinesIntersect(p1, p2, q1, q2) {
+      function orientation(p, q, r) {
+        var val = (q.lng - p.lng) * (r.lat - q.lat) - (q.lat - p.lat) * (r.lng - q.lng);
+        if (val === 0) return 0; // Collinear
+        return val > 0 ? 1 : 2;  // Clockwise or counterclockwise
+      }
+
+      function onSegment(p, q, r) {
+        return q.lng <= Math.max(p.lng, r.lng) && q.lng >= Math.min(p.lng, r.lng) &&
+               q.lat <= Math.max(p.lat, r.lat) && q.lat >= Math.min(p.lat, r.lat);
+      }
+
+      var o1 = orientation(p1, p2, q1);
+      var o2 = orientation(p1, p2, q2);
+      var o3 = orientation(q1, q2, p1);
+      var o4 = orientation(q1, q2, p2);
+
+      if (o1 !== o2 && o3 !== o4) return true; // General case
+
+      if (o1 === 0 && onSegment(p1, q1, p2)) return true; // Special case
+      if (o2 === 0 && onSegment(p1, q2, p2)) return true;
+      if (o3 === 0 && onSegment(q1, p1, q2)) return true;
+      if (o4 === 0 && onSegment(q1, p2, q2)) return true;
+
+      return false; // No intersection
+    }
+
+    // Function to check if the line formed by points 3 and 4 intersects with the line formed by points 1 and 2
+    function doesIntersect(p1, p2, p3, p4) {
+      return doLinesIntersect(p1, p2, p3, p4);
+    }
+
+    // Function to check if a point is inside a polygon using ray-casting algorithm
+    function isPointInPolygon(point, vs) {
+      var x = point.lat, y = point.lng;
+
+      var inside = false;
+      for (var i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        var xi = vs[i].lat, yi = vs[i].lng;
+        var xj = vs[j].lat, yj = vs[j].lng;
+
+        var intersect = ((yi > y) != (yj > y)) &&
+                        (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+
+      return inside;
+    }
+
+    // Export vertices of the grid and polygon to CSV
+    document.getElementById('export').addEventListener('click', function () {
+      if (gridLayer.getLayers().length === 0) {
+        alert('No grid points to export!');
+        return;
+      }
+
+      var csvContent = 'data:text/csv;charset=utf-8,';
+      csvContent += 'Latitude,Longitude\n';
+
+      // Export polygon vertices first
+      currentPolygon.getLatLngs()[0].forEach(function (vertex) {
+        csvContent += vertex.lat + ',' + vertex.lng + '\n';
+      });
+
+      // Export grid points
+      gridLayer.eachLayer(function (layer) {
+        var latLng = layer.getLatLng();
+        csvContent += latLng.lat + ',' + latLng.lng + '\n';
+      });
+
+      var encodedUri = encodeURI(csvContent);
+      var link = document.createElement('a');
+      link.setAttribute('href', encodedUri);
+      link.setAttribute('download', 'grid_points.csv');
+      document.body.appendChild(link);
+
+      link.click();
+      document.body.removeChild(link); // Clean up
+    });
+
+    // Delete the last vertex or the whole polygon if it's already completed
+    document.getElementById('delete').addEventListener('click', function () {
+      if (tempPolygon.length > 0) {
+        tempPolygon.pop(); // Remove the last vertex
+        var markerToRemove = vertexMarkers.pop(); // Remove the corresponding vertex marker
+        map.removeLayer(markerToRemove); // Remove the vertex marker from the map
+        if (polygonLayer) {
+          map.removeLayer(polygonLayer); // Redraw the temporary polygon without the last vertex
+        }
+        if (tempPolygon.length > 0) {
+          polygonLayer = L.polygon(tempPolygon, { color: 'blue' }).addTo(map);
+        }
+      } else if (currentPolygon) {
+        // If the polygon is complete, remove it entirely
+        map.removeLayer(currentPolygon);
+        drawnItems.clearLayers();
+        vertexLayer.clearLayers();
+        gridLayer.clearLayers();
+        polygonAreaElement.textContent = '0'; // Reset the area display
+        currentPolygon = null;
+        vertexMarkers = []; // Reset the vertex markers array
+      }
+    });
+  </script>
+</body>
+</html>

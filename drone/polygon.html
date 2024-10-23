@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leaflet 4-Vertex Polygon and Grid</title>
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
+  />
+
+
+  <style>
+    #map {
+      height: 500px;
+      width: 100%;
+    }
+    #controls {
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="controls">
+    <label for="pointDensity">Number of points:</label>
+    <input type="range" id="pointDensity" min="2" max="20" value="5" />
+    <span id="densityValue">5</span>
+    <button id="export">Export Vertices to CSV</button>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+
+  <script>
+    // Initialize the map and center it on Durham, NC
+    var map = L.map('map').setView([35.9940, -78.8986], 13);
+
+    // Add a tile layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    }).addTo(map);
+
+    // Initialize drawn items and grid layer
+    var drawnItems = new L.FeatureGroup();
+    var gridLayer = new L.LayerGroup();
+    map.addLayer(drawnItems);
+    map.addLayer(gridLayer);
+
+    // Handle the slider value change
+    var densitySlider = document.getElementById('pointDensity');
+    var densityValue = document.getElementById('densityValue');
+    densitySlider.oninput = function () {
+      densityValue.textContent = this.value;
+      createGrid(); // Recreate the grid when the slider is changed
+    };
+
+    // Draw control for manually handling the 4-vertex polygon
+    var currentPolygon;
+    var tempPolygon = []; // Temporary storage for polygon vertices
+    var polygonLayer; // For displaying the temp polygon while drawing
+
+    map.on('click', function (e) {
+      // Allow the user to add up to 4 vertices
+      if (tempPolygon.length < 4) {
+        tempPolygon.push(e.latlng);
+        
+        if (polygonLayer) {
+          map.removeLayer(polygonLayer); // Clear the temporary polygon
+        }
+
+        // Show the polygon as it's being drawn
+        polygonLayer = L.polygon(tempPolygon, { color: 'blue' }).addTo(map);
+
+        // When the 4th point is added, close the polygon
+        if (tempPolygon.length === 4) {
+          // Automatically close the polygon by connecting the last point to the first
+          drawnItems.clearLayers(); // Clear previous polygons
+          map.removeLayer(polygonLayer); // Remove the temp drawing
+          currentPolygon = L.polygon(tempPolygon, { color: 'blue' }).addTo(drawnItems);
+
+          // Clear the temporary array for the next drawing
+          tempPolygon = [];
+
+          createGrid(); // Create the grid immediately after polygon creation
+        }
+      }
+    });
+
+    // Function to check if a point is inside a polygon using ray-casting algorithm
+    function isPointInPolygon(point, vs) {
+      var x = point.lat, y = point.lng;
+
+      var inside = false;
+      for (var i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        var xi = vs[i].lat, yi = vs[i].lng;
+        var xj = vs[j].lat, yj = vs[j].lng;
+
+        var intersect = ((yi > y) != (yj > y)) &&
+                        (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+
+      return inside;
+    }
+
+    // Function to create the grid points inside the polygon
+    function createGrid() {
+      if (!currentPolygon) {
+        return; // No polygon drawn yet
+      }
+
+      gridLayer.clearLayers(); // Remove any existing grid points
+
+      var bounds = currentPolygon.getBounds();
+      var latLngs = currentPolygon.getLatLngs()[0]; // Get the polygon vertices
+
+      var rows = parseInt(densitySlider.value, 10); // Number of points in one direction (rows)
+      var cols = rows; // Square grid
+
+      // Calculate the bounding box of the polygon
+      var northWest = bounds.getNorthWest();
+      var southEast = bounds.getSouthEast();
+
+      var latStep = (northWest.lat - southEast.lat) / (rows - 1);
+      var lngStep = (southEast.lng - northWest.lng) / (cols - 1);
+
+      // Generate grid points
+      for (var i = 0; i < rows; i++) {
+        for (var j = 0; j < cols; j++) {
+          var lat = northWest.lat - i * latStep;
+          var lng = northWest.lng + j * lngStep;
+
+          var point = L.latLng(lat, lng);
+
+          // Check if the point is inside the polygon
+          if (isPointInPolygon(point, latLngs)) {
+            var marker = L.circleMarker(point, { radius: 3, color: 'red' });
+            gridLayer.addLayer(marker);
+          }
+        }
+      }
+    }
+
+    // Export vertices of the grid to CSV
+    document.getElementById('export').addEventListener('click', function () {
+      if (gridLayer.getLayers().length === 0) {
+        alert('No grid points to export!');
+        return;
+      }
+
+      var csvContent = 'data:text/csv;charset=utf-8,';
+      csvContent += 'Latitude,Longitude\n';
+
+      gridLayer.eachLayer(function (layer) {
+        var latLng = layer.getLatLng();
+        csvContent += latLng.lat + ',' + latLng.lng + '\n';
+      });
+
+      var encodedUri = encodeURI(csvContent);
+      var link = document.createElement('a');
+      link.setAttribute('href', encodedUri);
+      link.setAttribute('download', 'grid_points.csv');
+      document.body.appendChild(link);
+
+      link.click();
+      document.body.removeChild(link); // Clean up
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leaflet Rectangle Export to CSV</title>
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
+  />
+
+  <!-- Leaflet Draw CSS -->
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"
+  />
+
+  <style>
+    #map {
+      height: 500px;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <button id="export">Export Vertices to CSV</button>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+
+  <!-- Leaflet Draw JS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+
+  <script>
+    // Initialize the map
+    var map = L.map('map').setView([51.505, -0.09], 13);
+
+    // Add a tile layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    }).addTo(map);
+
+    // Initialize the draw control
+    var drawControl = new L.Control.Draw({
+      draw: {
+        polygon: false,
+        polyline: false,
+        circle: false,
+        marker: false,
+        circlemarker: false,
+        rectangle: true, // Enable rectangle drawing
+      },
+      edit: {
+        featureGroup: new L.FeatureGroup(),
+      },
+    });
+    map.addControl(drawControl);
+
+    // Feature group for drawn items
+    var drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
+
+    // Event when a rectangle is created
+    map.on(L.Draw.Event.CREATED, function (event) {
+      var layer = event.layer;
+      drawnItems.addLayer(layer);
+    });
+
+    // Export vertices of the rectangle to CSV
+    document.getElementById('export').addEventListener('click', function () {
+      if (drawnItems.getLayers().length === 0) {
+        alert('No rectangle drawn!');
+        return;
+      }
+
+      var csvContent = 'data:text/csv;charset=utf-8,';
+      csvContent += 'Latitude,Longitude\n';
+
+      drawnItems.eachLayer(function (layer) {
+        if (layer instanceof L.Rectangle) {
+          var latLngs = layer.getLatLngs()[0]; // Get rectangle vertices
+          latLngs.forEach(function (latLng) {
+            csvContent += latLng.lat + ',' + latLng.lng + '\n';
+          });
+        }
+      });
+
+      var encodedUri = encodeURI(csvContent);
+      var link = document.createElement('a');
+      link.setAttribute('href', encodedUri);
+      link.setAttribute('download', 'rectangle_vertices.csv');
+      document.body.appendChild(link);
+
+      link.click();
+      document.body.removeChild(link); // Clean up
+    });
+  </script>
+</body>
+</html>

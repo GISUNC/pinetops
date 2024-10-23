@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leaflet Rectangle and Grid</title>
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
+  />
+
+  <!-- Leaflet Draw CSS -->
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"
+  />
+
+  <style>
+    #map {
+      height: 500px;
+      width: 100%;
+    }
+    #controls {
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="controls">
+    <label for="pointDensity">Number of points:</label>
+    <input type="range" id="pointDensity" min="2" max="20" value="5" />
+    <span id="densityValue">5</span>
+    <button id="createGrid">Create Grid</button>
+    <button id="export">Export Vertices to CSV</button>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+
+  <!-- Leaflet Draw JS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+
+  <script>
+    // Initialize the map
+    var map = L.map('map').setView([51.505, -0.09], 13);
+
+    // Add a tile layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    }).addTo(map);
+
+    // Initialize the draw control
+    var drawControl = new L.Control.Draw({
+      draw: {
+        polygon: false,
+        polyline: false,
+        circle: false,
+        marker: false,
+        circlemarker: false,
+        rectangle: true, // Enable rectangle drawing
+      },
+      edit: {
+        featureGroup: new L.FeatureGroup(),
+      },
+    });
+    map.addControl(drawControl);
+
+    // Feature group for drawn items
+    var drawnItems = new L.FeatureGroup();
+    var gridLayer = new L.LayerGroup(); // Layer to hold the grid points
+    map.addLayer(drawnItems);
+    map.addLayer(gridLayer);
+
+    // Handle the slider value change
+    var densitySlider = document.getElementById('pointDensity');
+    var densityValue = document.getElementById('densityValue');
+    densitySlider.oninput = function () {
+      densityValue.textContent = this.value;
+    };
+
+    // Event when a rectangle is created
+    var currentRectangle;
+    map.on(L.Draw.Event.CREATED, function (event) {
+      var layer = event.layer;
+      drawnItems.clearLayers(); // Remove previous shapes
+      drawnItems.addLayer(layer);
+      currentRectangle = layer; // Store the current rectangle for grid creation
+    });
+
+    // Create the grid points based on the slider value
+    document.getElementById('createGrid').addEventListener('click', function () {
+      if (!currentRectangle) {
+        alert('Please draw a rectangle first!');
+        return;
+      }
+
+      gridLayer.clearLayers(); // Remove any existing grid points
+
+      var bounds = currentRectangle.getBounds();
+      var northWest = bounds.getNorthWest();
+      var southEast = bounds.getSouthEast();
+
+      var rows = parseInt(densitySlider.value, 10); // Number of points in one direction (rows)
+      var cols = rows; // We'll use a square grid for simplicity
+
+      var latStep = (northWest.lat - southEast.lat) / (rows - 1);
+      var lngStep = (southEast.lng - northWest.lng) / (cols - 1);
+
+      // Generate grid points
+      for (var i = 0; i < rows; i++) {
+        for (var j = 0; j < cols; j++) {
+          var lat = northWest.lat - i * latStep;
+          var lng = northWest.lng + j * lngStep;
+
+          var marker = L.circleMarker([lat, lng], { radius: 3, color: 'red' });
+          gridLayer.addLayer(marker);
+        }
+      }
+    });
+
+    // Export vertices of the rectangle to CSV
+    document.getElementById('export').addEventListener('click', function () {
+      if (drawnItems.getLayers().length === 0) {
+        alert('No rectangle drawn!');
+        return;
+      }
+
+      var csvContent = 'data:text/csv;charset=utf-8,';
+      csvContent += 'Latitude,Longitude\n';
+
+      gridLayer.eachLayer(function (layer) {
+        var latLng = layer.getLatLng();
+        csvContent += latLng.lat + ',' + latLng.lng + '\n';
+      });
+
+      var encodedUri = encodeURI(csvContent);
+      var link = document.createElement('a');
+      link.setAttribute('href', encodedUri);
+      link.setAttribute('download', 'grid_points.csv');
+      document.body.appendChild(link);
+
+      link.click();
+      document.body.removeChild(link); // Clean up
+    });
+  </script>
+</body>
+</html>
