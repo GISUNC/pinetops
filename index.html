@@ -3,23 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js glTF Viewer</title>
+    <title>Three.js Model on Leaflet Map</title>
     <style>
-        body { margin: 0; }
-        canvas { display: block; width: 100vw; height: 100vh; }
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; }
     </style>
+    <!-- Leaflet CSS for map styling -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 </head>
 <body>
-    <button id="saveImageBtn" style="position: absolute; top: 10px; left: 10px; z-index: 10;">Export Image</button>
+    <!-- Leaflet Map Container -->
+    <div id="map"></div>
 
-    <!-- Include Three.js from the reliable unpkg CDN -->
+    <!-- Leaflet and Three.js CDNs -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/three@0.135.0/build/three.min.js"></script>
-    <!-- Include OrbitControls from the reliable unpkg CDN -->
-    <script src="https://unpkg.com/three@0.135.0/examples/js/controls/OrbitControls.js"></script>
-    <!-- Include GLTFLoader from the reliable unpkg CDN -->
     <script src="https://unpkg.com/three@0.135.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://unpkg.com/three@0.135.0/examples/js/controls/OrbitControls.js"></script>
 
-    <!-- Include your custom script -->
+    <!-- Custom Script -->
     <script src="app.js"></script>
 </body>
 </html>

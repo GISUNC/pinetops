@@ -24,7 +24,7 @@
 <body>
   <div id="map"></div>
   <div id="controls">
-    <label for="pointDensity">Number of points:</label>
+    <label for="pointDensity">Altitude</label>
     <input type="range" id="pointDensity" min="2" max="20" value="5" />
     <span id="densityValue">5</span>
     <p>Area covered by the polygon: <span id="polygonArea">0</span> acres</p>
@@ -77,9 +77,6 @@
     var polygonAreaElement = document.getElementById('polygonArea');
 
 
-
-
-
     map.on('click', function (e) {
       // Allow the user to add up to 4 vertices
       if (tempPolygon.length < 4) {
@@ -129,123 +126,124 @@
       }
     });
 
-    function createGrid() {
-  if (!currentPolygon) {
-    return; // No polygon drawn yet
-  }
+  function createGrid() {
+      if (!currentPolygon) {
+        return; // No polygon drawn yet
+      }
 
-  gridLayer.clearLayers(); // Remove any existing grid points
+      gridLayer.clearLayers(); // Remove any existing grid points
 
-  var bounds = currentPolygon.getBounds();
-  var latLngs = currentPolygon.getLatLngs()[0]; // Get the polygon vertices
+      var bounds = currentPolygon.getBounds();
+      var latLngs = currentPolygon.getLatLngs()[0]; // Get the polygon vertices
 
-  var rows = parseInt(densitySlider.value, 10); // Number of points in one direction (rows)
-  var cols = rows; // Square grid
+      var rows = parseInt(densitySlider.value, 10); // Number of points in one direction (rows)
+      var cols = rows; // Square grid
 
-  // Calculate the bounding box of the polygon
-  var northWest = bounds.getNorthWest();
-  var southEast = bounds.getSouthEast();
+      // Calculate the bounding box of the polygon
+      var northWest = bounds.getNorthWest();
+      var southEast = bounds.getSouthEast();
 
-  var latStep = (northWest.lat - southEast.lat) / (rows - 1);
-  var lngStep = (southEast.lng - northWest.lng) / (cols - 1);
+      var latStep = (northWest.lat - southEast.lat) / (rows - 1);
+      var lngStep = (southEast.lng - northWest.lng) / (cols - 1);
 
-  // Function to find intersection point of a horizontal line with a polygon edge (latitude intersections)
-  function getLatIntersection(lineLat, edgeStart, edgeEnd) {
-    var A1 = edgeEnd.lat - edgeStart.lat;
-    var B1 = edgeStart.lng - edgeEnd.lng;
-    var C1 = A1 * edgeStart.lng + B1 * edgeStart.lat;
+      // Function to find intersection point of a horizontal line with a polygon edge (latitude intersections)
+      function getLatIntersection(lineLat, edgeStart, edgeEnd) {
+        var A1 = edgeEnd.lat - edgeStart.lat;
+        var B1 = edgeStart.lng - edgeEnd.lng;
+        var C1 = A1 * edgeStart.lng + B1 * edgeStart.lat;
 
-    var A2 = 0; // Horizontal line (constant latitude)
-    var B2 = 1;
-    var C2 = B2 * lineLat;
+        var A2 = 0; // Horizontal line (constant latitude)
+        var B2 = 1;
+        var C2 = B2 * lineLat;
 
-    var determinant = A1 * B2 - A2 * B1;
+        var determinant = A1 * B2 - A2 * B1;
 
-    if (determinant === 0) {
-      return null; // The lines are parallel
-    } else {
-      var x = (B2 * C1 - B1 * C2) / determinant;
-      var y = lineLat;
+        if (determinant === 0) {
+          return null; // The lines are parallel
+        } else {
+          var x = (B2 * C1 - B1 * C2) / determinant;
+          var y = lineLat;
 
-      // Check if the intersection point lies within the edge segment
-      if (x >= Math.min(edgeStart.lng, edgeEnd.lng) && x <= Math.max(edgeStart.lng, edgeEnd.lng) &&
+          // Check if the intersection point lies within the edge segment
+          if (x >= Math.min(edgeStart.lng, edgeEnd.lng) && x <= Math.max(edgeStart.lng, edgeEnd.lng) &&
+              y >= Math.min(edgeStart.lat, edgeEnd.lat) && y <= Math.max(edgeStart.lat, edgeEnd.lat)) {
+            return L.latLng(y, x);
+          }
+        }
+        return null;
+      }
+
+      // Function to find intersection point of a vertical line with a polygon edge (longitude intersections)
+      function getLngIntersection(lineLng, edgeStart, edgeEnd) {
+      //console.log('Checking intersection for vertical line at longitude: ', lineLng);
+      
+      // We need to solve the line equation for the edge segment
+      // Line equation: y = m * x + b
+      // m is the slope of the edge, x is the longitude, y is the latitude
+
+      // Calculate slope (m) of the edge
+      var m = (edgeEnd.lat - edgeStart.lat) / (edgeEnd.lng - edgeStart.lng); // slope of the edge
+      console.log('Slope of edge: ', m);
+
+      // Calculate the y-intercept (b) for the edge
+      var b = edgeStart.lat - m * edgeStart.lng;
+      console.log('Y-intercept of edge: ', b);
+
+      // Solve for latitude (y) where the vertical line (constant longitude) intersects the edge
+      var y = m * lineLng + b;
+      // console.log('Calculated latitude for intersection: ', y);
+
+      // Check if the intersection point lies within the edge segment bounds
+      if (lineLng >= Math.min(edgeStart.lng, edgeEnd.lng) && lineLng <= Math.max(edgeStart.lng, edgeEnd.lng) &&
           y >= Math.min(edgeStart.lat, edgeEnd.lat) && y <= Math.max(edgeStart.lat, edgeEnd.lat)) {
-        return L.latLng(y, x);
-      }
-    }
-    return null;
-  }
-
-  // Function to find intersection point of a vertical line with a polygon edge (longitude intersections)
-  function getLngIntersection(lineLng, edgeStart, edgeEnd) {
-  console.log('Checking intersection for vertical line at longitude: ', lineLng);
-  
-  // We need to solve the line equation for the edge segment
-  // Line equation: y = m * x + b
-  // m is the slope of the edge, x is the longitude, y is the latitude
-
-  // Calculate slope (m) of the edge
-  var m = (edgeEnd.lat - edgeStart.lat) / (edgeEnd.lng - edgeStart.lng); // slope of the edge
-  console.log('Slope of edge: ', m);
-
-  // Calculate the y-intercept (b) for the edge
-  var b = edgeStart.lat - m * edgeStart.lng;
-  console.log('Y-intercept of edge: ', b);
-
-  // Solve for latitude (y) where the vertical line (constant longitude) intersects the edge
-  var y = m * lineLng + b;
-  console.log('Calculated latitude for intersection: ', y);
-
-  // Check if the intersection point lies within the edge segment bounds
-  if (lineLng >= Math.min(edgeStart.lng, edgeEnd.lng) && lineLng <= Math.max(edgeStart.lng, edgeEnd.lng) &&
-      y >= Math.min(edgeStart.lat, edgeEnd.lat) && y <= Math.max(edgeStart.lat, edgeEnd.lat)) {
-    console.log('Intersection is within the polygon edge.');
-    return L.latLng(y, lineLng);
-  } else {
-    console.log('Intersection is outside the edge bounds.');
-  }
-
-  return null;
-}
-
-
-  // Generate grid points and check for intersections with the polygon edges
-  for (var i = 0; i < rows; i++) {
-    for (var j = 0; j < cols; j++) {
-      var lat = northWest.lat - i * latStep;
-      var lng = northWest.lng + j * lngStep;
-
-      var point = L.latLng(lat, lng);
-
-      // Check if the point is inside the polygon
-      if (isPointInPolygon(point, latLngs)) {
-        var marker = L.circleMarker(point, { radius: 3, color: 'red' });
-        gridLayer.addLayer(marker); // Add grid points inside the polygon
+        // console.log('Intersection is within the polygon edge.');
+        return L.latLng(y, lineLng);
+      } else {
+        // console.log('Intersection is outside the edge bounds.');
       }
 
-      // Check for intersections with the polygon's edges along both horizontal and vertical grid lines
-      latLngs.forEach(function (vertex, index) {
-        var nextVertex = latLngs[(index + 1) % latLngs.length];
-
-        // Horizontal grid lines (constant latitude)
-        var intersectionLat = getLatIntersection(lat, vertex, nextVertex);
-        if (intersectionLat) {
-          var markerLat = L.circleMarker(intersectionLat, { radius: 3, color: 'blue' });
-          gridLayer.addLayer(markerLat); // Add points where the horizontal grid intersects polygon edges
-        }
-
-        // Vertical grid lines (constant longitude) — for debugging purposes, these markers will be orange
-        var intersectionLng = getLngIntersection(lng, vertex, nextVertex);
-        if (intersectionLng) {
-          var markerLng = L.circleMarker(intersectionLng, { radius: 3, color: 'orange' });
-          gridLayer.addLayer(markerLng); // Add points where the vertical grid intersects polygon edges
-        }
-      });
+      return null;
     }
-  }
-}
 
 
+      // Generate grid points and check for intersections with the polygon edges
+      for (var i = 0; i < rows; i++) {
+        for (var j = 0; j < cols; j++) {
+          var lat = northWest.lat - i * latStep;
+          var lng = northWest.lng + j * lngStep;
+
+          var point = L.latLng(lat, lng);
+
+          // Check if the point is inside the polygon
+          if (isPointInPolygon(point, latLngs)) {
+            var marker = L.circleMarker(point, { radius: 3, color: 'red' });
+            gridLayer.addLayer(marker); // Add grid points inside the polygon
+          }
+
+          // Check for intersections with the polygon's edges along both horizontal and vertical grid lines
+          latLngs.forEach(function (vertex, index) {
+            var nextVertex = latLngs[(index + 1) % latLngs.length];
+
+            // Horizontal grid lines (constant latitude)
+            var intersectionLat = getLatIntersection(lat, vertex, nextVertex);
+            if (intersectionLat) {
+              var markerLat = L.circleMarker(intersectionLat, { radius: 3, color: 'blue' });
+              gridLayer.addLayer(markerLat); // Add points where the horizontal grid intersects polygon edges
+            }
+
+            // Vertical grid lines (constant longitude) — for debugging purposes, these markers will be orange
+            var intersectionLng = getLngIntersection(lng, vertex, nextVertex);
+            if (intersectionLng) {
+              var markerLng = L.circleMarker(intersectionLng, { radius: 3, color: 'orange' });
+              gridLayer.addLayer(markerLng); // Add points where the vertical grid intersects polygon edges
+            }
+          });
+        }
+      }
+    }
+
+
+//
     // Shoelace formula to calculate polygon area in square meters
     function calculatePolygonArea(latlngs) {
       var earthRadius = 6378137; // Radius of the Earth in meters

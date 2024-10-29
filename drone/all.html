@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leaflet Polygon with Complete Path Calculation</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+
+  <style>
+    #map { height: 500px; width: 100%; }
+    #controls { margin-top: 10px; }
+
+    .order-label {
+    font-size: 7px; /* Adjust size as needed */
+    font-weight: bold;
+  }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="controls">
+    <label for="pointDensity">Altitude</label>
+    <input type="range" id="pointDensity" min="5" max="60" value="5" />
+    <span id="densityValue">5</span>
+    <p>Area covered by the polygon: <span id="polygonArea">0</span> acres</p>
+    <button id="export">Export Points to CSV</button>
+    <button id="delete">Delete Last Vertex/Polygon</button>
+    <br><br>
+    <label for="angleWeightSlider">Angle Weight: <span id="angleWeightValue">10</span></label>
+    <input type="range" id="angleWeightSlider" min="0" max="50" value="10">
+    <br><br>
+    <label for="startPointSlider">Starting Point: <span id="startPointValue">1</span></label>
+    <input type="range" id="startPointSlider" min="1" max="1" value="1"> <!-- dynamically set max -->
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+
+  <script>
+    const bounds = L.latLngBounds([[35.9848, -78.9947], [35.9859, -78.9871]]);
+    const map = L.map('map', { maxBounds: bounds, maxBoundsViscosity: 1.0 }).setView([35.98534, -78.99091], 17);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, minZoom: 15 }).addTo(map);
+
+    const drawnItems = new L.FeatureGroup();
+    const gridLayer = new L.LayerGroup();
+    const vertexLayer = new L.LayerGroup();
+    const waypointLayer = new L.LayerGroup();
+    map.addLayer(drawnItems);
+    map.addLayer(gridLayer);
+    map.addLayer(vertexLayer);
+    map.addLayer(waypointLayer);
+
+    let vertexMarkers = [];
+    let tempPolygon = [];
+    let currentPolygon, polygonLayer;
+    let allPoints = [];
+    const polygonAreaElement = document.getElementById('polygonArea');
+    const angleWeightSlider = document.getElementById('angleWeightSlider');
+    const startPointSlider = document.getElementById('startPointSlider');
+
+    map.on('click', function (e) {
+      if (tempPolygon.length < 4) {
+        tempPolygon.push(e.latlng);
+
+        if (polygonLayer) map.removeLayer(polygonLayer);
+        polygonLayer = L.polygon(tempPolygon, { color: 'blue' }).addTo(map);
+
+        const marker = L.circleMarker(e.latlng, { radius: 5, color: 'green' }).addTo(vertexLayer);
+        vertexMarkers.push(marker);
+
+        if (tempPolygon.length === 4) {
+          if (doesIntersect(tempPolygon[0], tempPolygon[1], tempPolygon[2], tempPolygon[3])) {
+            alert("Polygon cannot intersect itself.");
+            tempPolygon.pop();
+            map.removeLayer(marker);
+            return;
+          }
+          completePolygon();
+        }
+      }
+    });
+
+    function completePolygon() {
+      drawnItems.clearLayers();
+      vertexLayer.clearLayers();
+      map.removeLayer(polygonLayer);
+
+      currentPolygon = L.polygon(tempPolygon, { color: 'blue' }).addTo(drawnItems);
+      tempPolygon.forEach(vertex => {
+        if (vertex && vertex.lat !== undefined && vertex.lng !== undefined) {
+          L.circleMarker(vertex, { radius: 5, color: 'green' }).addTo(vertexLayer);
+        }
+      });
+
+      const area = calculatePolygonArea(tempPolygon) / 4046.86;
+      polygonAreaElement.textContent = area.toFixed(2);
+      tempPolygon = [];
+
+      createGrid();
+      updatePathOrder();
+    }
+
+    function createGrid() {
+    if (!currentPolygon) {
+        console.log("No polygon available for grid creation.");
+        return;
+    }
+    console.log("Creating grid with altitude:", document.getElementById('pointDensity').value);
+
+    gridLayer.clearLayers();
+    allPoints = []; // Clear previous points
+
+    const bounds = currentPolygon.getBounds();
+    const latLngs = currentPolygon.getLatLngs()[0];
+    const altitude = parseInt(document.getElementById('pointDensity').value, 10);
+    const distanceBetweenPoints = 0.373 * altitude;
+
+    const rows = Math.max(2, Math.ceil(bounds.getNorthWest().distanceTo(bounds.getSouthWest()) / distanceBetweenPoints));
+    const cols = Math.max(2, Math.ceil(bounds.getNorthEast().distanceTo(bounds.getNorthWest()) / distanceBetweenPoints));
+    const latStep = (bounds.getNorthWest().lat - bounds.getSouthEast().lat) / (rows - 1);
+    const lngStep = (bounds.getSouthEast().lng - bounds.getNorthWest().lng) / (cols - 1);
+
+    function getLatIntersection(lineLat, edgeStart, edgeEnd) {
+        const A1 = edgeEnd.lat - edgeStart.lat;
+        const B1 = edgeStart.lng - edgeEnd.lng;
+        const C1 = A1 * edgeStart.lng + B1 * edgeStart.lat;
+
+        const A2 = 0; // Horizontal line
+        const B2 = 1;
+        const C2 = B2 * lineLat;
+
+        const determinant = A1 * B2 - A2 * B1;
+        if (determinant === 0) return null; // Parallel lines
+
+        const x = (B2 * C1 - B1 * C2) / determinant;
+        const y = lineLat;
+        if (x >= Math.min(edgeStart.lng, edgeEnd.lng) && x <= Math.max(edgeStart.lng, edgeEnd.lng)) {
+            return L.latLng(y, x);
+        }
+        return null;
+    }
+
+    function getLngIntersection(lineLng, edgeStart, edgeEnd) {
+        const m = (edgeEnd.lat - edgeStart.lat) / (edgeEnd.lng - edgeStart.lng);
+        const b = edgeStart.lat - m * edgeStart.lng;
+
+        const y = m * lineLng + b;
+        if (lineLng >= Math.min(edgeStart.lng, edgeEnd.lng) && lineLng <= Math.max(edgeStart.lng, edgeEnd.lng)) {
+            return L.latLng(y, lineLng);
+        }
+        return null;
+    }
+
+    for (let i = 0; i < rows; i++) {
+        for (let j = 0; j < cols; j++) {
+            const lat = bounds.getNorthWest().lat - i * latStep;
+            const lng = bounds.getNorthWest().lng + j * lngStep;
+            const point = L.latLng(lat, lng);
+
+            if (isPointInPolygon(point, latLngs)) {
+                const marker = L.circleMarker(point, { radius: 3, color: 'red' });
+                gridLayer.addLayer(marker);
+                allPoints.push(point);
+            }
+
+            // Check for intersections with polygon edges
+            latLngs.forEach((vertex, index) => {
+                const nextVertex = latLngs[(index + 1) % latLngs.length];
+
+                const intersectionLat = getLatIntersection(lat, vertex, nextVertex);
+                if (intersectionLat) {
+                    const markerLat = L.circleMarker(intersectionLat, { radius: 3, color: 'blue' });
+                    gridLayer.addLayer(markerLat);
+                    allPoints.push(intersectionLat);
+                }
+
+                const intersectionLng = getLngIntersection(lng, vertex, nextVertex);
+                if (intersectionLng) {
+                    const markerLng = L.circleMarker(intersectionLng, { radius: 3, color: 'orange' });
+                    gridLayer.addLayer(markerLng);
+                    allPoints.push(intersectionLng);
+                }
+            });
+        }
+    }
+
+    // Include polygon vertices and deduplicate close points
+    allPoints = removeClosePoints(currentPolygon.getLatLngs()[0].concat(allPoints));
+
+    // Get boundary and vertex points and update start point slider
+    setValidStartPoints();
+
+    startPointSlider.max = boundaryAndVertexPoints.length; // Set max to boundary and vertex points count
+    startPointSlider.oninput = function () {
+        document.getElementById('startPointValue').textContent = parseInt(this.value);
+    };
+
+    updatePathOrder();
+    console.log("Grid points created:", gridLayer.getLayers().length);
+}
+
+// Filter for boundary and vertex points
+function getBoundaryAndVertexPoints(points, polygonVertices) {
+    return points.filter(point => {
+        const isVertex = polygonVertices.some(v => v.lat === point.lat && v.lng === point.lng);
+        const isBoundary = gridLayer.getLayers().some(layer => {
+            const layerPoint = layer.getLatLng();
+            return layerPoint.lat === point.lat && layerPoint.lng === point.lng;
+        });
+        return isVertex || isBoundary;
+    });
+}
+
+// Use only boundary and vertex points for the start point slider
+function setValidStartPoints() {
+    boundaryAndVertexPoints = getBoundaryAndVertexPoints(allPoints, currentPolygon.getLatLngs()[0]);
+}
+
+
+function updatePathOrder() {
+    const angleWeight = parseInt(angleWeightSlider.value);
+    const startPoint = parseInt(startPointSlider.value) - 1;
+
+    waypointLayer.clearLayers();
+    const optimizedPath = findShortestPathWithDynamicAngleCost(allPoints, angleWeight, startPoint);
+
+    optimizedPath.forEach((point, index) => {
+        const marker = L.circleMarker(point, { radius: 5, color: 'blue' })
+            .bindTooltip(`${index + 1}`, { permanent: true, className: "order-label" })
+            .openTooltip()
+            .addTo(waypointLayer);
+        console.log(`Waypoint ${index + 1}:`, point);
+    });
+}
+
+//     function findShortestPathWithAngle(points, angleWeight, startIndex) {
+//     const path = [points[startIndex]];
+//     const visited = new Set([startIndex]);
+
+//     while (path.length < points.length) {
+//         const lastPoint = path[path.length - 1];
+//         let minCost = Infinity;
+//         let nextIndex = -1;
+
+//         for (let i = 0; i < points.length; i++) {
+//             if (visited.has(i)) continue;
+
+//             const distance = getDistance(lastPoint, points[i]);
+//             let angleCost = 0;
+
+//             if (path.length > 1) {
+//                 angleCost = calculateAngle(path[path.length - 2], lastPoint, points[i]);
+//             }
+
+//             const totalCost = distance + angleWeight * angleCost;
+
+//             console.log(`Evaluating point ${i}: distance=${distance}, angleCost=${angleCost}, totalCost=${totalCost}`);
+
+//             if (totalCost < minCost) {
+//                 minCost = totalCost;
+//                 nextIndex = i;
+//             }
+//         }
+
+//         if (nextIndex !== -1) {
+//             path.push(points[nextIndex]);
+//             visited.add(nextIndex);
+//         } else {
+//             console.error("No next point found. Path may be incomplete.");
+//             break;
+//         }
+//     }
+
+//     return path;
+// }
+
+function findShortestPath(points, startIndex) {
+    const path = [points[startIndex]]; // Start with the designated starting point
+    const visited = new Set([startIndex]); // Track visited points
+
+    while (path.length < points.length) {
+        const lastPoint = path[path.length - 1];
+        let minDistance = Infinity;
+        let nextIndex = -1;
+
+        for (let i = 0; i < points.length; i++) {
+            if (visited.has(i)) continue; // Skip visited points
+
+            const distance = getDistance(lastPoint, points[i]);
+            if (distance < minDistance) {
+                minDistance = distance;
+                nextIndex = i;
+            }
+        }
+
+        // Add the next closest point to the path and mark it as visited
+        if (nextIndex !== -1) {
+            path.push(points[nextIndex]);
+            visited.add(nextIndex);
+        } else {
+            console.error("No next point found. Path may be incomplete.");
+            break;
+        }
+    }
+
+    return path;
+}
+
+    function exportToCSV() {
+  let csvContent = "data:text/csv;charset=utf-8,id,latitude,longitude,altitude(m),heading(deg),curvesize(m),rotationdir,gimbalmode,gimbalpitchangle,altitudemode,speed(m/s),poi_latitude,poi_longitude,poi_altitude(m),poi_altitudemode,photo_timeinterval,photo_distinterval\n";
+
+  allPoints.forEach((point, index) => {
+    csvContent += `${index + 1},${point.lat},${point.lng},10,0,0.2,0,0,0,0,1,0,0,0,0,0,1\n`; // Placeholder values
+  });
+
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement("a");
+  link.setAttribute("href", encodedUri);
+  link.setAttribute("download", "points.csv");
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+
+    document.getElementById("export").addEventListener("click", exportToCSV);
+
+    document.getElementById("delete").addEventListener("click", function () {
+      if (tempPolygon.length > 0) {
+        tempPolygon.pop();
+        const markerToRemove = vertexMarkers.pop();
+        map.removeLayer(markerToRemove);
+        if (polygonLayer) {
+          map.removeLayer(polygonLayer);
+        }
+        if (tempPolygon.length > 0) {
+            polygonLayer = L.polygon(tempPolygon, { color: 'blue' }).addTo(map);
+        }
+} else if (currentPolygon) {
+        // If the polygon is complete, remove it entirely
+        map.removeLayer(currentPolygon);
+        drawnItems.clearLayers();
+        vertexLayer.clearLayers();
+        gridLayer.clearLayers();
+        waypointLayer.clearLayers();
+        polygonAreaElement.textContent = '0'; // Reset area display
+        currentPolygon = null;
+        allPoints = []; // Clear all points
+        startPointSlider.max = 1; // Reset start point slider max
+      }
+    });
+
+    angleWeightSlider.addEventListener('input', function () {
+      document.getElementById('angleWeightValue').textContent = this.value;
+      updatePathOrder();
+    });
+
+    startPointSlider.addEventListener('input', function () {
+      document.getElementById('startPointValue').textContent = this.value;
+      updatePathOrder();
+    });
+
+    document.getElementById('pointDensity').oninput = function () {
+      document.getElementById('densityValue').textContent = this.value;
+      createGrid();
+    };
+
+    // Helper functions
+    function calculatePolygonArea(latlngs) {
+      let area = 0;
+      const len = latlngs.length;
+      for (let i = 0; i < len; i++) {
+        const j = (i + 1) % len;
+        const xi = latlngs[i].lng;
+        const yi = latlngs[i].lat;
+        const xj = latlngs[j].lng;
+        const yj = latlngs[j].lat;
+        area += xi * yj - xj * yi;
+      }
+      return Math.abs(area / 2.0);
+    }
+
+    function isPointInPolygon(point, vs) {
+      let inside = false;
+      for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        const xi = vs[i].lat, yi = vs[i].lng;
+        const xj = vs[j].lat, yj = vs[j].lng;
+        const intersect = ((yi > point.lng) != (yj > point.lng)) &&
+                          (point.lat < (xj - xi) * (point.lng - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    function getDistance(p1, p2) {
+    if (!p1 || !p2 || isNaN(p1.lat) || isNaN(p1.lng) || isNaN(p2.lat) || isNaN(p2.lng)) {
+        console.error("Invalid points for distance calculation:", p1, p2);
+        return Infinity;
+    }
+
+    const R = 6371e3; // Earth radius in meters
+    const φ1 = p1.lat * Math.PI / 180;
+    const φ2 = p2.lat * Math.PI / 180;
+    const Δφ = (p2.lat - p1.lat) * Math.PI / 180;
+    const Δλ = (p2.lng - p1.lng) * Math.PI / 180;
+
+    const a = Math.sin(Δφ / 2) ** 2 +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distance in meters
+}
+
+function calculateAngle(p1, p2, p3) {
+    if (!p1 || !p2 || !p3 || isNaN(p1.lat) || isNaN(p1.lng) || isNaN(p2.lat) || isNaN(p2.lng) || isNaN(p3.lat) || isNaN(p3.lng)) {
+        console.error("Invalid points for angle calculation:", p1, p2, p3);
+        return 0;
+    }
+
+    function bearing(from, to) {
+        const φ1 = from.lat * Math.PI / 180;
+        const φ2 = to.lat * Math.PI / 180;
+        const Δλ = (to.lng - from.lng) * Math.PI / 180;
+
+        const y = Math.sin(Δλ) * Math.cos(φ2);
+        const x = Math.cos(φ1) * Math.sin(φ2) -
+                  Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+        return Math.atan2(y, x) * 180 / Math.PI;
+    }
+
+    const bearing1 = bearing(p1, p2);
+    const bearing2 = bearing(p2, p3);
+
+    return Math.abs(bearing2 - bearing1);
+}
+
+    function doesIntersect(p1, p2, p3, p4) {
+      function orientation(p, q, r) {
+        const val = (q.lng - p.lng) * (r.lat - q.lat) - (q.lat - p.lat) * (r.lng - q.lng);
+        if (val === 0) return 0;
+        return val > 0 ? 1 : 2;
+      }
+
+      function onSegment(p, q, r) {
+        return q.lng <= Math.max(p.lng, r.lng) && q.lng >= Math.min(p.lng, r.lng) &&
+               q.lat <= Math.max(p.lat, r.lat) && q.lat >= Math.min(p.lat, r.lat);
+      }
+
+      const o1 = orientation(p1, p2, p3);
+      const o2 = orientation(p1, p2, p4);
+      const o3 = orientation(p3, p4, p1);
+      const o4 = orientation(p3, p4, p2);
+
+      return (o1 !== o2 && o3 !== o4) ||
+             (o1 === 0 && onSegment(p1, p3, p2)) ||
+             (o2 === 0 && onSegment(p1, p4, p2)) ||
+             (o3 === 0 && onSegment(p3, p1, p4)) ||
+             (o4 === 0 && onSegment(p3, p2, p4));
+    }
+
+
+    // Helper function to calculate the distance between two points
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371000; // Radius of Earth in meters
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Remove points closer than 2 meters
+function removeClosePoints(points, tolerance = 2) {
+  const uniquePoints = [];
+  points.forEach(point => {
+    if (!uniquePoints.some(p => calculateDistance(p.lat, p.lng, point.lat, point.lng) < tolerance)) {
+      uniquePoints.push(point);
+    }
+  });
+  return uniquePoints;
+}
+
+
+function findShortestPathWithDynamicAngleCost(points, angleWeight, startIndex) {
+    const path = [points[startIndex]]; // Start from the designated point
+    const visited = new Set([startIndex]); // Track visited points
+
+    while (path.length < points.length) {
+        const lastPoint = path[path.length - 1];
+        let minCost = Infinity;
+        let nextIndex = -1;
+
+        for (let i = 0; i < points.length; i++) {
+            if (visited.has(i)) continue; // Skip visited points
+
+            // Calculate straight-line distance
+            const distance = getDistance(lastPoint, points[i]);
+
+            // Only calculate angle if more than one point in path
+            let angleCost = 0;
+            if (path.length > 1) {
+                const previousPoint = path[path.length - 2];
+                angleCost = calculateAngleCost(previousPoint, lastPoint, points[i]);
+            }
+
+            // Apply angle weight only for closer points to prioritize straight paths nearby
+            const totalCost = distance + (distance < 50 ? angleWeight * angleCost : 0);
+
+            if (totalCost < minCost) {
+                minCost = totalCost;
+                nextIndex = i;
+            }
+        }
+
+        // Add the next closest or straightest point to the path
+        if (nextIndex !== -1) {
+            path.push(points[nextIndex]);
+            visited.add(nextIndex);
+        } else {
+            console.error("No next point found. Path may be incomplete.");
+            break;
+        }
+    }
+
+    return path;
+}
+
+function calculateAngleCost(p1, p2, p3) {
+    // Helper function to calculate the initial bearing from one point to another
+    function bearing(from, to) {
+        const φ1 = from.lat * Math.PI / 180;
+        const φ2 = to.lat * Math.PI / 180;
+        const Δλ = (to.lng - from.lng) * Math.PI / 180;
+
+        const y = Math.sin(Δλ) * Math.cos(φ2);
+        const x = Math.cos(φ1) * Math.sin(φ2) -
+                  Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+        return Math.atan2(y, x) * 180 / Math.PI;
+    }
+
+    // Calculate the bearings between points
+    const bearing1 = bearing(p1, p2);
+    const bearing2 = bearing(p2, p3);
+
+    // Calculate the absolute difference in bearings as the angle cost
+    let angleDifference = Math.abs(bearing2 - bearing1);
+    if (angleDifference > 180) {
+        angleDifference = 360 - angleDifference; // Normalize to [0, 180]
+    }
+
+    return angleDifference; // Higher value for sharper turns
+}
+
+
+
+
+  </script>
+</body>
+</html>

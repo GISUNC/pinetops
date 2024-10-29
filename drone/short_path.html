@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Leaflet TSP with Adjustable Directional Cost</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        #map { height: 600px; }
+        .controls { padding: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="controls">
+    <label for="angleWeightSlider">Angle Weight: <span id="angleWeightValue">10</span></label>
+    <input type="range" id="angleWeightSlider" min="0" max="50" value="10">
+
+    <label for="pointCountSlider">Number of Points: <span id="pointCountValue">50</span></label>
+    <input type="range" id="pointCountSlider" min="10" max="100" value="50">
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+<script>
+// Initialize the map
+const map = L.map('map').setView([51.505, -0.09], 13);
+
+// Add OpenStreetMap tiles
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+}).addTo(map);
+
+// Initialize variables for waypoints and path
+let waypoints = [];
+let markers = [];
+let pathLine;
+
+// Function to generate random waypoints within the map bounds
+function generateRandomWaypoints(count) {
+    waypoints = [];
+    for (let i = 0; i < count; i++) {
+        const lat = 51.5 + (Math.random() - 0.5) * 0.1;
+        const lng = -0.09 + (Math.random() - 0.5) * 0.1;
+        waypoints.push([lat, lng]);
+    }
+}
+
+// Function to calculate distance between two points
+function getDistance(p1, p2) {
+    const [lat1, lng1] = p1;
+    const [lat2, lng2] = p2;
+    const R = 6371e3;
+    const φ1 = lat1 * Math.PI / 180;
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Function to calculate angle between three points
+function calculateAngle(p1, p2, p3) {
+    const angle = Math.atan2(p3[1] - p2[1], p3[0] - p2[0]) - Math.atan2(p2[1] - p1[1], p2[0] - p1[0]);
+    return Math.abs(angle) * (180 / Math.PI); // Convert to degrees
+}
+
+// Nearest Neighbor with directional cost
+function findShortestPathWithAngle(waypoints, angleWeight) {
+    const path = [waypoints[0]]; // Start from the first waypoint
+    const visited = new Set();
+    visited.add(0);
+
+    while (path.length < waypoints.length) {
+        const lastIndex = path.length - 1;
+        let minCost = Infinity;
+        let nextIndex = -1;
+
+        for (let i = 0; i < waypoints.length; i++) {
+            if (visited.has(i)) continue;
+            const distance = getDistance(path[lastIndex], waypoints[i]);
+            let angleCost = 0;
+
+            if (lastIndex > 0) {
+                angleCost = calculateAngle(path[lastIndex - 1], path[lastIndex], waypoints[i]);
+            }
+
+            const cost = distance + angleWeight * angleCost;
+            if (cost < minCost) {
+                minCost = cost;
+                nextIndex = i;
+            }
+        }
+
+        path.push(waypoints[nextIndex]);
+        visited.add(nextIndex);
+    }
+    return path;
+}
+
+// Function to update map visualization
+function updateMap() {
+    const angleWeight = parseInt(document.getElementById('angleWeightSlider').value);
+    const pointCount = parseInt(document.getElementById('pointCountSlider').value);
+    
+    document.getElementById('angleWeightValue').textContent = angleWeight;
+    document.getElementById('pointCountValue').textContent = pointCount;
+
+    // Clear existing markers and path
+    markers.forEach(marker => map.removeLayer(marker));
+    markers = [];
+    if (pathLine) map.removeLayer(pathLine);
+
+    // Generate new waypoints and path
+    generateRandomWaypoints(pointCount);
+    const optimizedPath = findShortestPathWithAngle(waypoints, angleWeight);
+
+    // Add markers with order labels
+    optimizedPath.forEach((point, index) => {
+        const marker = L.marker(point).addTo(map)
+            .bindTooltip(`${index + 1}`, { permanent: true, className: "order-label" })
+            .openTooltip();
+        markers.push(marker);
+    });
+
+    // Draw path
+    pathLine = L.polyline(optimizedPath, { color: 'blue' }).addTo(map);
+}
+
+// Add event listeners to sliders
+document.getElementById('angleWeightSlider').addEventListener('input', updateMap);
+document.getElementById('pointCountSlider').addEventListener('input', updateMap);
+
+// Initial map update
+updateMap();
+
+</script>
+</body>
+</html>
