@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Display PLY</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r146/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three/examples/js/loaders/PLYLoader.js"></script>
+  <style>
+    body { margin: 0; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <script>
+    // Create the scene, camera, and renderer
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Add lights
+    const light = new THREE.AmbientLight(0x404040); // Soft white light
+    scene.add(light);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(5, 10, 7.5).normalize();
+    scene.add(directionalLight);
+
+    // Load the PLY file
+    const loader = new THREE.PLYLoader();
+    loader.load('/Users/jarce/Documents/dev/pinetops/The University of North Carolina at Chapel Hill.ply', function (geometry) {
+      const material = new THREE.MeshStandardMaterial({ color: 0x0055ff, flatShading: true });
+      const mesh = new THREE.Mesh(geometry, material);
+      geometry.computeVertexNormals(); // Compute normals for proper shading
+      scene.add(mesh);
+
+      mesh.position.set(0, 0, 0); // Set position
+      mesh.scale.set(0.1, 0.1, 0.1); // Adjust scale if needed
+    });
+
+    // Set the camera position
+    camera.position.z = 5;
+
+    // Animation loop
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>

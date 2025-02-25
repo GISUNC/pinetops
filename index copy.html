@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Model on Leaflet Map</title>
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; }
+    </style>
+    <!-- Leaflet CSS for map styling -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+</head>
+<body>
+    <!-- Leaflet Map Container -->
+    <div id="map"></div>
+
+    <!-- Leaflet and Three.js CDNs -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/three@0.135.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.135.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://unpkg.com/three@0.135.0/examples/js/controls/OrbitControls.js"></script>
+
+    <!-- Custom Script -->
+    <script src="app.js"></script>
+</body>
+</html>
